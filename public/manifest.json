@@ -1,0 +1,14 @@
+{
+  "name": "Citadel POW",
+  "short_name": "POW",
+  "description": "POW 활동을 기록하고 비트코인을 기부하세요",
+  "start_url": "/my-pow",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FF6B35",
+  "orientation": "portrait",
+  "icons": [],
+  "categories": ["productivity", "lifestyle"],
+  "lang": "ko",
+  "dir": "ltr"
+}
