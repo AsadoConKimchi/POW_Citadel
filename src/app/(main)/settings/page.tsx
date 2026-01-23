@@ -13,6 +13,7 @@ export default function SettingsPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [groupPowNotifications, setGroupPowNotifications] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSyncingRole, setIsSyncingRole] = useState(false);
 
   // Fetch latest user data from database
   useEffect(() => {
@@ -79,6 +80,34 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSyncRole = async () => {
+    if (!user?.id) return;
+
+    setIsSyncingRole(true);
+    try {
+      const response = await fetch('/api/user/sync-role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || '역할 동기화에 실패했습니다.');
+        return;
+      }
+
+      setUser(data.user);
+      alert('역할이 동기화되었습니다!');
+    } catch (err) {
+      console.error('Sync role error:', err);
+      alert('역할 동기화에 실패했습니다.');
+    } finally {
+      setIsSyncingRole(false);
+    }
+  };
+
   const requestNotificationPermission = async () => {
     if ('Notification' in window) {
       const permission = await Notification.requestPermission();
@@ -116,6 +145,13 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
+        <button
+          onClick={handleSyncRole}
+          disabled={isSyncingRole}
+          className="mt-4 w-full py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-700 dark:text-gray-300 font-medium rounded-lg transition-colors text-sm"
+        >
+          {isSyncingRole ? '동기화 중...' : '🔄 역할 동기화'}
+        </button>
       </section>
 
       {/* 통계 */}
