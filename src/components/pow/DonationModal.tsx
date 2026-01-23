@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { formatNumber } from '@/lib/utils';
 import { WALLET_OPTIONS, WALLET_DEEPLINKS } from '@/constants';
 import { usePowStore } from '@/stores/pow-store';
@@ -28,6 +28,7 @@ export default function DonationModal({
   const [isLoading, setIsLoading] = useState(true);
   const [isPaid, setIsPaid] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isProcessingRef = useRef(false);  // 중복 호출 방지용
 
   // Invoice 생성
   useEffect(() => {
@@ -64,12 +65,26 @@ export default function DonationModal({
   useEffect(() => {
     if (!invoiceId || isPaid) return;
 
+    let intervalId: NodeJS.Timeout | null = null;
+
     const checkPayment = async () => {
+      // 이미 처리 중이면 스킵
+      if (isProcessingRef.current) return;
+
       try {
         const response = await fetch(`/api/blink/invoice/${invoiceId}`);
         const data = await response.json();
 
-        if (data.paid) {
+        if (data.paid && !isProcessingRef.current) {
+          // 중복 호출 방지
+          isProcessingRef.current = true;
+
+          // interval 즉시 정리
+          if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+          }
+
           setIsPaid(true);
 
           // 기부 완료 처리
@@ -100,9 +115,11 @@ export default function DonationModal({
       }
     };
 
-    const interval = setInterval(checkPayment, 2000); // 2초마다 체크
+    intervalId = setInterval(checkPayment, 2000); // 2초마다 체크
 
-    return () => clearInterval(interval);
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [invoiceId, isPaid, mode, powRecordId, amount, user, setUser, onSuccess]);
 
   // 지갑 딥링크 열기
