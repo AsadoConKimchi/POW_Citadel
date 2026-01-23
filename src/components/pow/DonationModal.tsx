@@ -61,112 +61,7 @@ export default function DonationModal({
     createInvoice();
   }, [amount, memo]);
 
-  // GraphQL Subscription으로 결제 상태 확인
-  useEffect(() => {
-    if (!invoiceId || isPaid) return;
-
-    let ws: WebSocket | null = null;
-
-    const connectSubscription = () => {
-      // Blink GraphQL WebSocket 연결
-      ws = new WebSocket('wss://api.blink.sv/graphql', 'graphql-transport-ws');
-
-      ws.onopen = () => {
-        // Connection init
-        ws?.send(JSON.stringify({
-          type: 'connection_init',
-          payload: {},
-        }));
-      };
-
-      ws.onmessage = async (event) => {
-        const message = JSON.parse(event.data);
-
-        if (message.type === 'connection_ack') {
-          // Subscribe to payment status
-          ws?.send(JSON.stringify({
-            id: '1',
-            type: 'subscribe',
-            payload: {
-              query: `
-                subscription LnInvoicePaymentStatus($input: LnInvoicePaymentStatusInput!) {
-                  lnInvoicePaymentStatus(input: $input) {
-                    status
-                    errors {
-                      message
-                    }
-                  }
-                }
-              `,
-              variables: {
-                input: {
-                  paymentHash: invoiceId,
-                },
-              },
-            },
-          }));
-        }
-
-        if (message.type === 'next' && message.payload?.data?.lnInvoicePaymentStatus) {
-          const status = message.payload.data.lnInvoicePaymentStatus.status;
-
-          if (status === 'PAID' && !isProcessingRef.current) {
-            isProcessingRef.current = true;
-
-            // WebSocket 연결 종료
-            ws?.send(JSON.stringify({ id: '1', type: 'complete' }));
-            ws?.close();
-
-            setIsPaid(true);
-
-            // 기부 완료 처리
-            await fetch('/api/pow/donate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                mode,
-                powRecordId,
-                amount,
-                userId: user?.id,
-              }),
-            });
-
-            // 사용자 정보 업데이트
-            if (user) {
-              setUser({
-                ...user,
-                total_donated_sats: user.total_donated_sats + amount,
-                accumulated_sats: mode === 'accumulated' ? 0 : user.accumulated_sats,
-              });
-            }
-
-            onSuccess?.();
-          }
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-      };
-
-      ws.onclose = () => {
-        console.log('WebSocket closed');
-      };
-    };
-
-    connectSubscription();
-
-    return () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ id: '1', type: 'complete' }));
-        ws.close();
-      }
-    };
-  }, [invoiceId, isPaid, mode, powRecordId, amount, user, setUser, onSuccess]);
-
-  /* ============================================
-   * 기존 Polling 방식 (백업용 - 주석 처리)
-   * ============================================
+  // Invoice 상태 확인 (Polling 방식)
   useEffect(() => {
     if (!invoiceId || isPaid) return;
 
@@ -219,6 +114,92 @@ export default function DonationModal({
 
     return () => {
       if (intervalId) clearInterval(intervalId);
+    };
+  }, [invoiceId, isPaid, mode, powRecordId, amount, user, setUser, onSuccess]);
+
+  /* ============================================
+   * GraphQL Subscription 방식 (추후 디버깅 필요)
+   * - Blink API 인증 방식 확인 필요
+   * - WebSocket 엔드포인트 확인 필요
+   * ============================================
+  useEffect(() => {
+    if (!invoiceId || isPaid) return;
+
+    let ws: WebSocket | null = null;
+
+    const connectSubscription = () => {
+      ws = new WebSocket('wss://api.blink.sv/graphql', 'graphql-transport-ws');
+
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({
+          type: 'connection_init',
+          payload: {},
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        const message = JSON.parse(event.data);
+
+        if (message.type === 'connection_ack') {
+          ws?.send(JSON.stringify({
+            id: '1',
+            type: 'subscribe',
+            payload: {
+              query: `
+                subscription LnInvoicePaymentStatus($input: LnInvoicePaymentStatusInput!) {
+                  lnInvoicePaymentStatus(input: $input) {
+                    status
+                    errors { message }
+                  }
+                }
+              `,
+              variables: {
+                input: { paymentHash: invoiceId },
+              },
+            },
+          }));
+        }
+
+        if (message.type === 'next' && message.payload?.data?.lnInvoicePaymentStatus) {
+          const status = message.payload.data.lnInvoicePaymentStatus.status;
+
+          if (status === 'PAID' && !isProcessingRef.current) {
+            isProcessingRef.current = true;
+            ws?.send(JSON.stringify({ id: '1', type: 'complete' }));
+            ws?.close();
+
+            setIsPaid(true);
+
+            await fetch('/api/pow/donate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mode, powRecordId, amount, userId: user?.id }),
+            });
+
+            if (user) {
+              setUser({
+                ...user,
+                total_donated_sats: user.total_donated_sats + amount,
+                accumulated_sats: mode === 'accumulated' ? 0 : user.accumulated_sats,
+              });
+            }
+
+            onSuccess?.();
+          }
+        }
+      };
+
+      ws.onerror = (error) => console.error('WebSocket error:', error);
+      ws.onclose = () => console.log('WebSocket closed');
+    };
+
+    connectSubscription();
+
+    return () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ id: '1', type: 'complete' }));
+        ws.close();
+      }
     };
   }, [invoiceId, isPaid, mode, powRecordId, amount, user, setUser, onSuccess]);
   */
