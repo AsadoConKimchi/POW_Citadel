@@ -106,8 +106,8 @@ export function getDiscordAvatarUrl(userId: string, avatarHash: string | null): 
 
 // 역할 상태 결정
 export function determineRoleStatus(roles: string[]): 0 | 1 | 2 {
-  const fullnoderId = process.env.NEXT_PUBLIC_DISCORD_ROLE_FULLNODER || '1456691566306656329';
-  const bitcoinerId = process.env.NEXT_PUBLIC_DISCORD_ROLE_BITCOINER || '1456691252329447517';
+  const fullnoderId = process.env.DISCORD_ROLE_FULLNODER || '1456691566306656329';
+  const bitcoinerId = process.env.DISCORD_ROLE_BITCOINER || '1456691252329447517';
 
   if (roles.includes(fullnoderId)) {
     return 2; // 풀노더
