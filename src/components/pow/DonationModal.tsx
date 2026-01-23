@@ -61,14 +61,118 @@ export default function DonationModal({
     createInvoice();
   }, [amount, memo]);
 
-  // Invoice 상태 폴링
+  // GraphQL Subscription으로 결제 상태 확인
+  useEffect(() => {
+    if (!invoiceId || isPaid) return;
+
+    let ws: WebSocket | null = null;
+
+    const connectSubscription = () => {
+      // Blink GraphQL WebSocket 연결
+      ws = new WebSocket('wss://api.blink.sv/graphql', 'graphql-transport-ws');
+
+      ws.onopen = () => {
+        // Connection init
+        ws?.send(JSON.stringify({
+          type: 'connection_init',
+          payload: {},
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        const message = JSON.parse(event.data);
+
+        if (message.type === 'connection_ack') {
+          // Subscribe to payment status
+          ws?.send(JSON.stringify({
+            id: '1',
+            type: 'subscribe',
+            payload: {
+              query: `
+                subscription LnInvoicePaymentStatus($input: LnInvoicePaymentStatusInput!) {
+                  lnInvoicePaymentStatus(input: $input) {
+                    status
+                    errors {
+                      message
+                    }
+                  }
+                }
+              `,
+              variables: {
+                input: {
+                  paymentHash: invoiceId,
+                },
+              },
+            },
+          }));
+        }
+
+        if (message.type === 'next' && message.payload?.data?.lnInvoicePaymentStatus) {
+          const status = message.payload.data.lnInvoicePaymentStatus.status;
+
+          if (status === 'PAID' && !isProcessingRef.current) {
+            isProcessingRef.current = true;
+
+            // WebSocket 연결 종료
+            ws?.send(JSON.stringify({ id: '1', type: 'complete' }));
+            ws?.close();
+
+            setIsPaid(true);
+
+            // 기부 완료 처리
+            await fetch('/api/pow/donate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                mode,
+                powRecordId,
+                amount,
+                userId: user?.id,
+              }),
+            });
+
+            // 사용자 정보 업데이트
+            if (user) {
+              setUser({
+                ...user,
+                total_donated_sats: user.total_donated_sats + amount,
+                accumulated_sats: mode === 'accumulated' ? 0 : user.accumulated_sats,
+              });
+            }
+
+            onSuccess?.();
+          }
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+      };
+    };
+
+    connectSubscription();
+
+    return () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ id: '1', type: 'complete' }));
+        ws.close();
+      }
+    };
+  }, [invoiceId, isPaid, mode, powRecordId, amount, user, setUser, onSuccess]);
+
+  /* ============================================
+   * 기존 Polling 방식 (백업용 - 주석 처리)
+   * ============================================
   useEffect(() => {
     if (!invoiceId || isPaid) return;
 
     let intervalId: NodeJS.Timeout | null = null;
 
     const checkPayment = async () => {
-      // 이미 처리 중이면 스킵
       if (isProcessingRef.current) return;
 
       try {
@@ -76,10 +180,8 @@ export default function DonationModal({
         const data = await response.json();
 
         if (data.paid && !isProcessingRef.current) {
-          // 중복 호출 방지
           isProcessingRef.current = true;
 
-          // interval 즉시 정리
           if (intervalId) {
             clearInterval(intervalId);
             intervalId = null;
@@ -87,7 +189,6 @@ export default function DonationModal({
 
           setIsPaid(true);
 
-          // 기부 완료 처리
           await fetch('/api/pow/donate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -99,7 +200,6 @@ export default function DonationModal({
             }),
           });
 
-          // 사용자 정보 업데이트
           if (user) {
             setUser({
               ...user,
@@ -115,12 +215,13 @@ export default function DonationModal({
       }
     };
 
-    intervalId = setInterval(checkPayment, 2000); // 2초마다 체크
+    intervalId = setInterval(checkPayment, 2000);
 
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
   }, [invoiceId, isPaid, mode, powRecordId, amount, user, setUser, onSuccess]);
+  */
 
   // 지갑 딥링크 열기
   const openWallet = (walletId: string) => {
