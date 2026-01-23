@@ -10,12 +10,15 @@ import DonationModal from '@/components/pow/DonationModal';
 export default function CertificationPage() {
   const router = useRouter();
   const { completedPow, setCompletedPow, user } = usePowStore();
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [uploadedMedia, setUploadedMedia] = useState<string | null>(null);
+  const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
   const [memo, setMemo] = useState('');
   const [showDonationModal, setShowDonationModal] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // completedPow가 없으면 나의 POW 페이지로
   useEffect(() => {
@@ -34,14 +37,17 @@ export default function CertificationPage() {
 
   const fieldInfo = POW_FIELDS[completedPow.field];
 
-  // 이미지 업로드 처리
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // 미디어 업로드 처리 (이미지/동영상)
+  const handleMediaUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const isVideo = file.type.startsWith('video/');
+    setMediaType(isVideo ? 'video' : 'image');
+
     const reader = new FileReader();
     reader.onload = (event) => {
-      setUploadedImage(event.target?.result as string);
+      setUploadedMedia(event.target?.result as string);
     };
     reader.readAsDataURL(file);
   };
@@ -49,79 +55,98 @@ export default function CertificationPage() {
   // 인증카드 이미지 생성
   const generateCertificationCard = async (): Promise<Blob | null> => {
     const canvas = canvasRef.current;
-    if (!canvas || !uploadedImage) return null;
+    if (!canvas || !uploadedMedia) return null;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
+    // 이미지 또는 비디오 프레임을 그릴 소스 준비
+    const drawOverlay = (sourceWidth: number, sourceHeight: number, drawSource: () => void) => {
+      const maxWidth = 1080;
+      const aspectRatio = sourceHeight / sourceWidth;
+      canvas.width = maxWidth;
+      canvas.height = maxWidth * aspectRatio + 150;
+
+      // 소스 그리기
+      drawSource();
+
+      // 하단 오버레이 배경
+      const overlayHeight = 150;
+      const overlayY = canvas.height - overlayHeight;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      ctx.fillRect(0, overlayY, canvas.width, overlayHeight);
+
+      // 텍스트 설정
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textBaseline = 'middle';
+
+      // 분야 + 이모지
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText(`${fieldInfo.emoji} ${fieldInfo.labelKo}`, 30, overlayY + 30);
+
+      // Goal
+      ctx.font = '20px sans-serif';
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillText('Goal:', 30, overlayY + 60);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(completedPow.goal_content.substring(0, 30), 90, overlayY + 60);
+
+      // Time & Achieve
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillText('Time:', 30, overlayY + 90);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(formatTime(completedPow.actual_time), 90, overlayY + 90);
+
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillText('Achieve:', 200, overlayY + 90);
+      ctx.fillStyle = '#FF6B35';
+      ctx.fillText(`${completedPow.achievement_rate}%`, 280, overlayY + 90);
+
+      // Donation & Date
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillText('Donation:', 30, overlayY + 120);
+      ctx.fillStyle = '#FF6B35';
+      ctx.fillText(`${formatNumber(completedPow.actual_sats)} sats`, 120, overlayY + 120);
+
+      ctx.fillStyle = '#888888';
+      ctx.font = '16px sans-serif';
+      ctx.fillText(formatDateKorean(new Date()), canvas.width - 180, overlayY + 120);
+    };
 
     return new Promise((resolve) => {
-      img.onload = () => {
-        // 캔버스 크기 설정
+      if (mediaType === 'video' && videoRef.current) {
+        // 비디오: 현재 프레임 캡처
+        const video = videoRef.current;
         const maxWidth = 1080;
-        const aspectRatio = img.height / img.width;
-        canvas.width = maxWidth;
-        canvas.height = maxWidth * aspectRatio + 150; // 하단에 정보 추가
+        const aspectRatio = video.videoHeight / video.videoWidth;
 
-        // 이미지 그리기
-        ctx.drawImage(img, 0, 0, maxWidth, maxWidth * aspectRatio);
+        drawOverlay(video.videoWidth, video.videoHeight, () => {
+          ctx.drawImage(video, 0, 0, maxWidth, maxWidth * aspectRatio);
+        });
 
-        // 하단 오버레이 배경
-        const overlayHeight = 150;
-        const overlayY = canvas.height - overlayHeight;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-        ctx.fillRect(0, overlayY, canvas.width, overlayHeight);
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.9);
+      } else {
+        // 이미지
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const maxWidth = 1080;
+          const aspectRatio = img.height / img.width;
 
-        // 텍스트 설정
-        ctx.fillStyle = '#FFFFFF';
-        ctx.textBaseline = 'middle';
+          drawOverlay(img.width, img.height, () => {
+            ctx.drawImage(img, 0, 0, maxWidth, maxWidth * aspectRatio);
+          });
 
-        // 분야 + 이모지
-        ctx.font = 'bold 28px sans-serif';
-        ctx.fillText(`${fieldInfo.emoji} ${fieldInfo.labelKo}`, 30, overlayY + 30);
-
-        // Goal
-        ctx.font = '20px sans-serif';
-        ctx.fillStyle = '#CCCCCC';
-        ctx.fillText('Goal:', 30, overlayY + 60);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillText(completedPow.goal_content.substring(0, 30), 90, overlayY + 60);
-
-        // Time & Achieve
-        ctx.fillStyle = '#CCCCCC';
-        ctx.fillText('Time:', 30, overlayY + 90);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillText(formatTime(completedPow.actual_time), 90, overlayY + 90);
-
-        ctx.fillStyle = '#CCCCCC';
-        ctx.fillText('Achieve:', 200, overlayY + 90);
-        ctx.fillStyle = '#FF6B35';
-        ctx.fillText(`${completedPow.achievement_rate}%`, 280, overlayY + 90);
-
-        // Donation & Date
-        ctx.fillStyle = '#CCCCCC';
-        ctx.fillText('Donation:', 30, overlayY + 120);
-        ctx.fillStyle = '#FF6B35';
-        ctx.fillText(`${formatNumber(completedPow.actual_sats)} sats`, 120, overlayY + 120);
-
-        ctx.fillStyle = '#888888';
-        ctx.font = '16px sans-serif';
-        ctx.fillText(formatDateKorean(new Date()), canvas.width - 180, overlayY + 120);
-
-        canvas.toBlob((blob) => {
-          resolve(blob);
-        }, 'image/jpeg', 0.9);
-      };
-
-      img.src = uploadedImage;
+          canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.9);
+        };
+        img.src = uploadedMedia;
+      }
     });
   };
 
   // 디스코드 공유 (적립 모드)
   const handleShareOnly = async () => {
-    if (!uploadedImage) {
+    if (!uploadedMedia) {
       alert('사진을 업로드해주세요.');
       return;
     }
@@ -160,7 +185,7 @@ export default function CertificationPage() {
 
   // 기부 완료 후 처리
   const handleDonationSuccess = async () => {
-    if (!uploadedImage) return;
+    if (!uploadedMedia) return;
 
     try {
       const cardBlob = await generateCertificationCard();
@@ -194,36 +219,70 @@ export default function CertificationPage() {
         🎉 POW 완료!
       </h1>
 
-      {/* 이미지 업로드 */}
+      {/* 미디어 업로드 (사진/동영상) */}
       <div className="space-y-4">
+        {/* 미리보기 영역 */}
         <div
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative aspect-square w-full max-w-md mx-auto rounded-2xl overflow-hidden cursor-pointer transition-all ${
-            uploadedImage
+          className={`relative aspect-square w-full max-w-md mx-auto rounded-2xl overflow-hidden ${
+            uploadedMedia
               ? ''
-              : 'bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-orange-500'
+              : 'bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600'
           }`}
         >
-          {uploadedImage ? (
-            <img
-              src={uploadedImage}
-              alt="Uploaded"
-              className="w-full h-full object-cover"
-            />
+          {uploadedMedia ? (
+            mediaType === 'video' ? (
+              <video
+                ref={videoRef}
+                src={uploadedMedia}
+                controls
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <img
+                src={uploadedMedia}
+                alt="Uploaded"
+                className="w-full h-full object-cover"
+              />
+            )
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
               <span className="text-4xl mb-2">📸</span>
-              <p>사진을 업로드하세요</p>
-              <p className="text-sm">또는 클릭하여 촬영</p>
+              <p>사진 또는 동영상을 선택하세요</p>
             </div>
           )}
         </div>
+
+        {/* 업로드 버튼들 */}
+        <div className="flex gap-3 max-w-md mx-auto">
+          <button
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+          >
+            <span>📷</span> 촬영하기
+          </button>
+          <button
+            onClick={() => galleryInputRef.current?.click()}
+            className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+          >
+            <span>🖼️</span> 갤러리
+          </button>
+        </div>
+
+        {/* 카메라 입력 (촬영) */}
         <input
-          ref={fileInputRef}
+          ref={cameraInputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           capture="environment"
-          onChange={handleImageUpload}
+          onChange={handleMediaUpload}
+          className="hidden"
+        />
+        {/* 갤러리 입력 (선택) */}
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/*,video/*"
+          onChange={handleMediaUpload}
           className="hidden"
         />
       </div>
@@ -246,7 +305,7 @@ export default function CertificationPage() {
       )}
 
       {/* 인증카드 미리보기 */}
-      {uploadedImage && (
+      {uploadedMedia && (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
           <h3 className="font-medium text-gray-900 dark:text-white mb-3">인증카드 미리보기</h3>
           <div className="space-y-2 text-sm">
@@ -272,13 +331,13 @@ export default function CertificationPage() {
         {completedPow.mode === 'immediate' ? (
           <button
             onClick={() => {
-              if (!uploadedImage) {
+              if (!uploadedMedia) {
                 alert('사진을 업로드해주세요.');
                 return;
               }
               setShowDonationModal(true);
             }}
-            disabled={!uploadedImage}
+            disabled={!uploadedMedia}
             className="w-full py-4 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white font-bold rounded-xl transition-colors"
           >
             ⚡ Discord에 공유 & Sats 기부
@@ -286,7 +345,7 @@ export default function CertificationPage() {
         ) : (
           <button
             onClick={handleShareOnly}
-            disabled={!uploadedImage || isSharing}
+            disabled={!uploadedMedia || isSharing}
             className="w-full py-4 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white font-bold rounded-xl transition-colors"
           >
             {isSharing ? '공유 중...' : '💾 Discord에 공유 (적립)'}
