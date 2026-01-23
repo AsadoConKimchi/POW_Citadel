@@ -266,6 +266,10 @@ export default function SettingsPage() {
               Discord 서버
             </a>
           </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500 dark:text-gray-400">Made by</span>
+            <span className="text-gray-900 dark:text-white">A⚡ado 🌽 Kimchi</span>
+          </div>
         </div>
       </section>
 

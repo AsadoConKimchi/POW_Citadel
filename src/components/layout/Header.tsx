@@ -17,8 +17,9 @@ export default function Header() {
       <div className="max-w-screen-xl mx-auto px-4">
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
-          <Link href="/my-pow" className="flex items-center gap-2">
+          <Link href="/my-pow" className="flex flex-col">
             <span className="text-xl font-bold text-orange-500">Citadel POW</span>
+            <span className="text-[10px] text-gray-500 dark:text-gray-400 -mt-1">Proof of Work: Life of Satoshi</span>
           </Link>
 
           {/* User Profile */}
