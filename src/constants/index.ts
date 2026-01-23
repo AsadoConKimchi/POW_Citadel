@@ -49,10 +49,19 @@ export const TIME = {
 // Lightning 지갑 딥링크
 export const WALLET_DEEPLINKS = {
   walletOfSatoshi: (invoice: string) => `walletofsatoshi:${invoice}`,
+  blink: (invoice: string) => `lightning:${invoice}`,
+  strike: (invoice: string) => `strike:${invoice}`,
+  zeus: (invoice: string) => `zeusln:${invoice}`,
+};
+
+/* 이전 딥링크 (롤백용)
+export const WALLET_DEEPLINKS = {
+  walletOfSatoshi: (invoice: string) => `walletofsatoshi:${invoice}`,
   blink: (invoice: string) => `blink:lightning:${invoice}`,
   strike: (invoice: string) => `strike:lightning:${invoice}`,
   zeus: (invoice: string) => `lightning:${invoice}`,
 };
+*/
 
 // 지갑 목록
 export const WALLET_OPTIONS = [
