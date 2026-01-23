@@ -99,14 +99,16 @@ async function sendAccumulatedDonationToDiscord(userId: string, amount: number) 
   const supabase = createServiceRoleClient();
   const { data: user } = await supabase
     .from('users')
-    .select('discord_username')
+    .select('discord_id, discord_username')
     .eq('id', userId)
     .single();
 
   if (!user) return;
 
+  const userMention = user.discord_id ? `<@${user.discord_id}>` : user.discord_username || '사용자';
+
   const message = {
-    content: `💸 **${user.discord_username}**님이 적립해 두셨던 **${formatNumber(amount)} sats**를 기부했습니다!\n\n감사합니다! 🙏`,
+    content: `💸 ${userMention}님이 적립해 두셨던 **${formatNumber(amount)} sats**를 기부했습니다!\n\n감사합니다! 🙏`,
   };
 
   await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
