@@ -6,6 +6,7 @@ import { usePowStore } from '@/stores/pow-store';
 import { POW_FIELDS } from '@/constants';
 import { formatTime, formatDateKorean, formatNumber } from '@/lib/utils';
 import DonationModal from '@/components/pow/DonationModal';
+import { createClient } from '@/lib/supabase/client';
 
 interface MediaItem {
   id: string;
@@ -179,6 +180,36 @@ export default function CertificationPage() {
   };
 
 
+  // 미디어 파일을 Supabase Storage에 업로드 (4.5MB 제한 우회용)
+  const uploadMediaToSupabase = async (mediaItems: MediaItem[]): Promise<string[]> => {
+    const supabase = createClient();
+    const uploadedUrls: string[] = [];
+
+    for (const media of mediaItems) {
+      const ext = media.type === 'video' ? 'mp4' : 'jpg';
+      const fileName = `pow-media-${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('pow-images')
+        .upload(fileName, media.file, {
+          contentType: media.type === 'video' ? 'video/mp4' : 'image/jpeg',
+        });
+
+      if (uploadError) {
+        console.error('Media upload error:', uploadError);
+        continue;
+      }
+
+      const { data: publicUrl } = supabase.storage
+        .from('pow-images')
+        .getPublicUrl(fileName);
+
+      uploadedUrls.push(publicUrl.publicUrl);
+    }
+
+    return uploadedUrls;
+  };
+
   // 인증카드 이미지 생성
   const generateCertificationCard = async (): Promise<Blob | null> => {
     const canvas = canvasRef.current;
@@ -276,16 +307,20 @@ export default function CertificationPage() {
     setIsCompleting(true);
 
     try {
+      // 1. 미디어 파일을 Supabase에 먼저 업로드 (4.5MB 제한 우회)
+      const mediaUrls = await uploadMediaToSupabase(mediaList);
+      console.log('Uploaded media URLs:', mediaUrls);
+
+      // 2. 인증카드 생성
       const cardBlob = await generateCertificationCard();
       if (!cardBlob) throw new Error('인증카드 생성 실패');
 
+      // 3. 인증카드 + URL만 전송 (기존: 파일 직접 전송)
       const formData = new FormData();
       formData.append('certificationCard', cardBlob, 'certification.jpg');
 
-      // 모든 미디어 파일 추가 (인증카드 외 원본 파일들)
-      mediaList.forEach((media, index) => {
-        formData.append('mediaFiles', media.file, `media-${index}.${media.type === 'video' ? 'mp4' : 'jpg'}`);
-      });
+      // 미디어 URL 목록 전송 (파일 대신)
+      formData.append('mediaUrls', JSON.stringify(mediaUrls));
 
       formData.append('powData', JSON.stringify({
         ...completedPow,
@@ -319,16 +354,20 @@ export default function CertificationPage() {
     setIsCompleting(true);
 
     try {
+      // 1. 미디어 파일을 Supabase에 먼저 업로드 (4.5MB 제한 우회)
+      const mediaUrls = await uploadMediaToSupabase(mediaList);
+      console.log('Uploaded media URLs:', mediaUrls);
+
+      // 2. 인증카드 생성
       const cardBlob = await generateCertificationCard();
       if (!cardBlob) throw new Error('인증카드 생성 실패');
 
+      // 3. 인증카드 + URL만 전송 (기존: 파일 직접 전송)
       const formData = new FormData();
       formData.append('certificationCard', cardBlob, 'certification.jpg');
 
-      // 모든 미디어 파일 추가
-      mediaList.forEach((media, index) => {
-        formData.append('mediaFiles', media.file, `media-${index}.${media.type === 'video' ? 'mp4' : 'jpg'}`);
-      });
+      // 미디어 URL 목록 전송 (파일 대신)
+      formData.append('mediaUrls', JSON.stringify(mediaUrls));
 
       formData.append('powData', JSON.stringify({
         ...completedPow,

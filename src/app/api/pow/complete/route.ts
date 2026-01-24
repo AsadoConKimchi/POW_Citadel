@@ -4,12 +4,19 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
-    // 새로운 형식: certificationCard + mediaFiles
-    // 이전 형식과 호환: image
+    // 새로운 형식: certificationCard + mediaUrls (Supabase URL)
+    // 이전 형식과 호환: image, mediaFiles
     const certificationCard = formData.get('certificationCard') as Blob | null;
     const legacyImage = formData.get('image') as Blob | null;
     const imageFile = certificationCard || legacyImage;
+
+    // 새 방식: URL 목록 (4.5MB 제한 우회)
+    const mediaUrlsString = formData.get('mediaUrls') as string | null;
+    const mediaUrls: string[] = mediaUrlsString ? JSON.parse(mediaUrlsString) : [];
+
+    // 이전 방식 호환: 직접 파일 전송
     const mediaFiles = formData.getAll('mediaFiles') as File[];
+
     const powDataString = formData.get('powData') as string;
 
     if (!powDataString) {
@@ -110,11 +117,12 @@ export async function POST(request: NextRequest) {
 
     // Send to Discord
     console.log('Image URL for Discord:', imageUrl);
-    console.log('Media files count:', mediaFiles.length);
+    console.log('Media URLs count:', mediaUrls.length);
+    console.log('Media files count (legacy):', mediaFiles.length);
     if (imageFile) {
       try {
         console.log('Sending to Discord...');
-        await sendToDiscord(powRecord, powData, imageFile, mediaFiles);
+        await sendToDiscord(powRecord, powData, imageFile, mediaUrls, mediaFiles);
         console.log('Discord send success!');
       } catch (discordError) {
         console.error('Discord send error:', discordError);
@@ -140,6 +148,7 @@ async function sendToDiscord(
   powRecord: any,
   powData: any,
   certificationCard: Blob,
+  mediaUrls: string[],
   mediaFiles: File[]
 ): Promise<string | null> {
   const botToken = process.env.DISCORD_BOT_TOKEN;
@@ -168,22 +177,63 @@ async function sendToDiscord(
   console.log('Discord bot token exists:', !!botToken);
   console.log('Discord channel ID:', channelId);
 
+  // 새 방식: Supabase URL에서 파일 다운로드
+  const downloadedFiles: { buffer: ArrayBuffer; name: string; type: string }[] = [];
+  if (mediaUrls.length > 0) {
+    console.log('Downloading files from Supabase URLs...');
+    for (let i = 0; i < mediaUrls.length; i++) {
+      try {
+        const response = await fetch(mediaUrls[i]);
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          const contentType = response.headers.get('content-type') || 'image/jpeg';
+          const isVideo = contentType.startsWith('video/');
+          const ext = isVideo ? 'mp4' : 'jpg';
+          downloadedFiles.push({
+            buffer,
+            name: `media-${i + 1}.${ext}`,
+            type: contentType,
+          });
+          console.log(`Downloaded: ${mediaUrls[i]} (${buffer.byteLength} bytes)`);
+        }
+      } catch (err) {
+        console.error('Failed to download media:', mediaUrls[i], err);
+      }
+    }
+  }
+
+  // 다운로드된 파일 또는 직접 전송된 파일 사용
+  const hasDownloadedFiles = downloadedFiles.length > 0;
+  const hasLegacyFiles = mediaFiles.length > 0;
+
   // 미디어 파일이 있으면 multipart/form-data로 전송
-  if (mediaFiles.length > 0) {
+  if (hasDownloadedFiles || hasLegacyFiles) {
+    // 사용할 미디어 결정 (새 방식 우선)
+    const mediaCount = hasDownloadedFiles ? downloadedFiles.length : mediaFiles.length;
+
     // Build attachments list
     const attachments = [
       { id: 0, filename: 'certification.jpg', description: '인증카드' },
     ];
 
-    mediaFiles.forEach((file, index) => {
-      const isVideo = file.type.startsWith('video/');
-      const ext = isVideo ? 'mp4' : 'jpg';
-      attachments.push({
-        id: index + 1,
-        filename: `media-${index + 1}.${ext}`,
-        description: `미디어 ${index + 1}`,
-      });
-    });
+    for (let i = 0; i < mediaCount; i++) {
+      if (hasDownloadedFiles) {
+        attachments.push({
+          id: i + 1,
+          filename: downloadedFiles[i].name,
+          description: `미디어 ${i + 1}`,
+        });
+      } else {
+        const file = mediaFiles[i];
+        const isVideo = file.type.startsWith('video/');
+        const ext = isVideo ? 'mp4' : 'jpg';
+        attachments.push({
+          id: i + 1,
+          filename: `media-${i + 1}.${ext}`,
+          description: `미디어 ${i + 1}`,
+        });
+      }
+    }
 
     const payload = {
       content: contentText + memoText,
@@ -203,13 +253,22 @@ async function sendToDiscord(
     discordFormData.append('payload_json', JSON.stringify(payload));
     discordFormData.append('files[0]', certificationCard, 'certification.jpg');
 
-    mediaFiles.forEach((file, index) => {
-      const isVideo = file.type.startsWith('video/');
-      const ext = isVideo ? 'mp4' : 'jpg';
-      discordFormData.append(`files[${index + 1}]`, file, `media-${index + 1}.${ext}`);
-    });
-
-    console.log('Sending multipart with', mediaFiles.length + 1, 'files');
+    // 새 방식: 다운로드된 파일 사용
+    if (hasDownloadedFiles) {
+      downloadedFiles.forEach((file, index) => {
+        const blob = new Blob([file.buffer], { type: file.type });
+        discordFormData.append(`files[${index + 1}]`, blob, file.name);
+      });
+      console.log('Sending multipart with', downloadedFiles.length + 1, 'files (from Supabase URLs)');
+    } else {
+      // 이전 방식: 직접 전송된 파일 사용
+      mediaFiles.forEach((file, index) => {
+        const isVideo = file.type.startsWith('video/');
+        const ext = isVideo ? 'mp4' : 'jpg';
+        discordFormData.append(`files[${index + 1}]`, file, `media-${index + 1}.${ext}`);
+      });
+      console.log('Sending multipart with', mediaFiles.length + 1, 'files (legacy)');
+    }
 
     const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
       method: 'POST',
