@@ -31,8 +31,8 @@ function getSyncStartDate(): Date {
   return syncStart;
 }
 
-// Sync Discord reactions for all POW records
-export async function POST() {
+// Sync Discord reactions for all POW records (공유 함수)
+async function syncAllReactions() {
   try {
     const botToken = process.env.DISCORD_BOT_TOKEN;
     const channelId = process.env.DISCORD_POW_CHANNEL_ID;
@@ -207,16 +207,19 @@ export async function POST() {
   }
 }
 
-// GET endpoint to sync reactions for a specific POW record
+// POST endpoint (수동 호출용)
+export async function POST() {
+  return syncAllReactions();
+}
+
+// GET endpoint (Vercel Cron + 단일 레코드 동기화)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const powRecordId = searchParams.get('powRecordId');
 
+  // powRecordId 없으면 전체 동기화 (Vercel Cron용)
   if (!powRecordId) {
-    return NextResponse.json(
-      { error: 'powRecordId is required' },
-      { status: 400 }
-    );
+    return syncAllReactions();
   }
 
   try {
