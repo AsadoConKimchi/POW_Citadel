@@ -31,8 +31,8 @@ function getSyncStartDate(): Date {
   return syncStart;
 }
 
-// Sync Discord reactions for all POW records (Vercel Cron용 GET 지원)
-async function syncAllReactions() {
+// Sync Discord reactions for all POW records
+export async function POST() {
   try {
     const botToken = process.env.DISCORD_BOT_TOKEN;
     const channelId = process.env.DISCORD_POW_CHANNEL_ID;
@@ -207,19 +207,16 @@ async function syncAllReactions() {
   }
 }
 
-// POST endpoint - 수동 호출용
-export async function POST() {
-  return syncAllReactions();
-}
-
-// GET endpoint - Vercel Cron 또는 단일 POW 동기화용
+// GET endpoint to sync reactions for a specific POW record
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const powRecordId = searchParams.get('powRecordId');
 
-  // powRecordId 없으면 전체 동기화 (Vercel Cron용)
   if (!powRecordId) {
-    return syncAllReactions();
+    return NextResponse.json(
+      { error: 'powRecordId is required' },
+      { status: 400 }
+    );
   }
 
   try {
