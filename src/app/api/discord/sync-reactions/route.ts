@@ -75,6 +75,13 @@ export async function POST() {
 
         if (!messageResponse.ok) {
           console.error(`Failed to fetch message ${record.discord_message_id}:`, messageResponse.status);
+          console.error('Rate Limit Headers:', {
+            limit: messageResponse.headers.get('X-RateLimit-Limit'),
+            remaining: messageResponse.headers.get('X-RateLimit-Remaining'),
+            resetAfter: messageResponse.headers.get('X-RateLimit-Reset-After'),
+            retryAfter: messageResponse.headers.get('Retry-After'),
+            scope: messageResponse.headers.get('X-RateLimit-Scope'),
+          });
           continue;
         }
 
