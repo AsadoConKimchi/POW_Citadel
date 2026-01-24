@@ -152,6 +152,7 @@ export interface PopularPowEntry {
   user: User;
   total_reactions: number;
   reaction_details: Record<string, number>;
+  isLastWeek?: boolean;
 }
 
 // POW 목표 생성 폼

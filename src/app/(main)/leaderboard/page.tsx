@@ -153,8 +153,19 @@ export default function LeaderboardPage() {
       const supabase = getSupabaseClient();
 
       try {
-        // First, sync reactions from Discord
-        await fetch('/api/discord/sync-reactions', { method: 'POST' });
+        // 이번 주 시작일 계산
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - dayOfWeek);
+        weekStart.setHours(19, 0, 0, 0);
+        if (now < weekStart) {
+          weekStart.setDate(weekStart.getDate() - 7);
+        }
+
+        // 지난 주 시작일 (동기화 범위: 이번 주 시작 - 3일)
+        const syncStart = new Date(weekStart);
+        syncStart.setDate(syncStart.getDate() - 3);
 
         const { data, error } = await supabase
           .from('discord_reactions')
@@ -167,19 +178,37 @@ export default function LeaderboardPage() {
             )
           `)
           .gt('total_reactions', 0)
-          .order('total_reactions', { ascending: false })
-          .limit(5);
+          .gte('pow_records.completed_at', syncStart.toISOString())
+          .order('total_reactions', { ascending: false });
 
         if (error) throw error;
 
-        const formatted = data?.map((item: any) => ({
-          pow_record: item.pow_records,
-          user: item.pow_records.users,
-          total_reactions: item.total_reactions,
-          reaction_details: item.reaction_details,
-        })) || [];
+        // 이번 주 / 지난 주 구분
+        const thisWeekPows: PopularPowEntry[] = [];
+        const lastWeekPows: PopularPowEntry[] = [];
 
-        setPopularPows(formatted);
+        data?.forEach((item: any) => {
+          const completedAt = new Date(item.pow_records.completed_at);
+          const isThisWeek = completedAt >= weekStart;
+
+          const entry = {
+            pow_record: item.pow_records,
+            user: item.pow_records.users,
+            total_reactions: item.total_reactions,
+            reaction_details: item.reaction_details,
+            isLastWeek: !isThisWeek,
+          };
+
+          if (isThisWeek) {
+            thisWeekPows.push(entry);
+          } else {
+            lastWeekPows.push(entry);
+          }
+        });
+
+        // 이번 주 먼저, 그 다음 지난 주 (각각 반응 수 내림차순 정렬은 이미 됨)
+        const combined = [...thisWeekPows, ...lastWeekPows].slice(0, 10);
+        setPopularPows(combined);
       } catch (error) {
         console.error('Failed to fetch popular POWs:', error);
       } finally {
@@ -387,8 +416,15 @@ function PopularPowCard({ item, rank }: { item: PopularPowEntry; rank: number })
             alt={`${item.user.discord_username}의 인증카드`}
             className="w-full h-full object-cover"
           />
-          <div className="absolute top-2 left-2 bg-orange-500 text-white px-2 py-1 rounded-lg text-sm font-bold">
-            #{rank}
+          <div className="absolute top-2 left-2 flex gap-1">
+            {item.isLastWeek && (
+              <span className="bg-gray-500 text-white px-2 py-1 rounded-lg text-sm font-medium">
+                지난주
+              </span>
+            )}
+            <span className="bg-orange-500 text-white px-2 py-1 rounded-lg text-sm font-bold">
+              #{rank}
+            </span>
           </div>
           <div className="absolute top-2 right-2 bg-black/60 text-white px-2 py-1 rounded-lg text-sm">
             반응 {item.total_reactions}개
@@ -399,7 +435,14 @@ function PopularPowCard({ item, rank }: { item: PopularPowEntry; rank: number })
         {/* 이미지 없을 때만 순위/반응 표시 */}
         {!item.pow_record.image_url && (
           <div className="flex items-center justify-between mb-2">
-            <span className="text-lg font-bold text-orange-500">#{rank}</span>
+            <div className="flex items-center gap-2">
+              {item.isLastWeek && (
+                <span className="bg-gray-500 text-white px-2 py-0.5 rounded text-xs font-medium">
+                  지난주
+                </span>
+              )}
+              <span className="text-lg font-bold text-orange-500">#{rank}</span>
+            </div>
             <span className="text-sm text-gray-500">반응 {item.total_reactions}개</span>
           </div>
         )}

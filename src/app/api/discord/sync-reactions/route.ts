@@ -3,6 +3,33 @@ import { createServiceRoleClient } from '@/lib/supabase/server';
 
 const DISCORD_API_URL = 'https://discord.com/api/v10';
 const SYNC_COOLDOWN_MS = 60 * 1000; // 1분 쿨다운
+const REQUEST_DELAY_MS = 1000; // Discord Rate Limit 방지용 1초 딜레이
+
+// 딜레이 헬퍼 함수
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// 이번 주 시작일 계산 (일요일 19:00 KST 기준)
+function getWeekStartDate(): Date {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - dayOfWeek);
+  weekStart.setHours(19, 0, 0, 0);
+
+  if (now < weekStart) {
+    weekStart.setDate(weekStart.getDate() - 7);
+  }
+
+  return weekStart;
+}
+
+// 동기화 시작일 계산 (이번 주 시작 - 3일)
+function getSyncStartDate(): Date {
+  const weekStart = getWeekStartDate();
+  const syncStart = new Date(weekStart);
+  syncStart.setDate(syncStart.getDate() - 3);
+  return syncStart;
+}
 
 // Sync Discord reactions for all POW records
 export async function POST() {
@@ -41,11 +68,14 @@ export async function POST() {
       });
     }
 
-    // Get all POW records with discord_message_id
+    // Get POW records with discord_message_id (이번 주 + 지난 주 3일)
+    const syncStartDate = getSyncStartDate();
     const { data: powRecords, error: fetchError } = await supabase
       .from('pow_records')
-      .select('id, discord_message_id')
-      .not('discord_message_id', 'is', null);
+      .select('id, discord_message_id, completed_at')
+      .not('discord_message_id', 'is', null)
+      .gte('completed_at', syncStartDate.toISOString())
+      .order('completed_at', { ascending: false });
 
     if (fetchError) {
       console.error('Failed to fetch POW records:', fetchError);
@@ -61,7 +91,14 @@ export async function POST() {
 
     let updatedCount = 0;
 
-    for (const record of powRecords) {
+    for (let i = 0; i < powRecords.length; i++) {
+      const record = powRecords[i];
+
+      // Rate Limit 방지: 첫 요청 제외하고 1초 딜레이
+      if (i > 0) {
+        await delay(REQUEST_DELAY_MS);
+      }
+
       try {
         // Fetch message from Discord
         const messageResponse = await fetch(
