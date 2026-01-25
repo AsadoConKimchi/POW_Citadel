@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { PowField, PowRecord } from '@/types';
 import { POW_FIELDS } from '@/constants';
-import { formatTime, formatDateKorean, formatNumber } from '@/lib/utils';
+import { formatTime, formatDateKorean, formatNumber, getTodayStart, getCalendarWeekStart, getMonthStart } from '@/lib/utils';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { usePowStore } from '@/stores/pow-store';
 
@@ -27,23 +27,21 @@ export default function PowRecordList({ fieldFilter, dateFilter }: PowRecordList
       setIsLoading(true);
       const supabase = getSupabaseClient();
 
-      // 날짜 필터 계산
-      const now = new Date();
+      // 날짜 필터 계산 (모두 KST 기준)
       let startDate: Date;
 
       switch (dateFilter) {
         case 'today':
-          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          startDate = getTodayStart();
           break;
         case 'week':
-          const dayOfWeek = now.getDay();
-          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+          startDate = getCalendarWeekStart(); // 일요일 00:00 KST ~ 토요일 23:59 KST
           break;
         case 'month':
-          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          startDate = getMonthStart();
           break;
         default:
-          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+          startDate = getCalendarWeekStart();
       }
 
       let query = supabase

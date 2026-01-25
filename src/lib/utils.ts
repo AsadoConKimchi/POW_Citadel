@@ -71,17 +71,26 @@ export function formatDateTimeKorean(date: Date | string): string {
   return `${dateStr} ${hours}:${minutes}`;
 }
 
-// 이번 주 시작일 계산 (일요일 19:00 KST 기준)
-export function getWeekStartDate(): Date {
-  const now = new Date();
-  const kstOffset = 9 * 60; // KST is UTC+9
-  const utcNow = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
-  const kstNow = new Date(utcNow.getTime() + kstOffset * 60000);
+// ===== KST 시간대 유틸리티 =====
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000; // UTC+9 (밀리초)
 
-  // 현재 요일 (0 = Sunday)
+// 현재 시간을 KST 기준으로 가져오기
+export function getKSTNow(): Date {
+  const now = new Date();
+  const utcTime = now.getTime() + now.getTimezoneOffset() * 60 * 1000;
+  return new Date(utcTime + KST_OFFSET_MS);
+}
+
+// KST 날짜를 UTC로 변환 (DB 쿼리용)
+export function kstToUTC(kstDate: Date): Date {
+  return new Date(kstDate.getTime() - KST_OFFSET_MS);
+}
+
+// 리더보드 주간 시작일 (일요일 19:00 KST ~ 차주 일요일 18:59 KST)
+export function getLeaderboardWeekStart(): Date {
+  const kstNow = getKSTNow();
   const dayOfWeek = kstNow.getDay();
 
-  // 이번 주 일요일 19:00로 이동
   const weekStart = new Date(kstNow);
   weekStart.setDate(kstNow.getDate() - dayOfWeek);
   weekStart.setHours(TIME.LEADERBOARD_RESET_HOUR, 0, 0, 0);
@@ -91,7 +100,55 @@ export function getWeekStartDate(): Date {
     weekStart.setDate(weekStart.getDate() - 7);
   }
 
-  return weekStart;
+  // UTC로 변환하여 반환 (DB 쿼리용)
+  return kstToUTC(weekStart);
+}
+
+// 캘린더 주간 시작일 (일요일 00:00 KST ~ 토요일 23:59 KST)
+export function getCalendarWeekStart(): Date {
+  const kstNow = getKSTNow();
+  const dayOfWeek = kstNow.getDay();
+
+  const weekStart = new Date(kstNow);
+  weekStart.setDate(kstNow.getDate() - dayOfWeek);
+  weekStart.setHours(0, 0, 0, 0);
+
+  // UTC로 변환하여 반환 (DB 쿼리용)
+  return kstToUTC(weekStart);
+}
+
+// 캘린더 주간 종료일 (토요일 23:59:59 KST)
+export function getCalendarWeekEnd(): Date {
+  const kstNow = getKSTNow();
+  const dayOfWeek = kstNow.getDay();
+
+  const weekEnd = new Date(kstNow);
+  // 토요일까지 남은 일수 = 6 - 현재요일
+  weekEnd.setDate(kstNow.getDate() + (6 - dayOfWeek));
+  weekEnd.setHours(23, 59, 59, 999);
+
+  // UTC로 변환하여 반환 (DB 쿼리용)
+  return kstToUTC(weekEnd);
+}
+
+// 오늘 시작 (00:00 KST)
+export function getTodayStart(): Date {
+  const kstNow = getKSTNow();
+  const todayStart = new Date(kstNow);
+  todayStart.setHours(0, 0, 0, 0);
+  return kstToUTC(todayStart);
+}
+
+// 이번 달 시작 (1일 00:00 KST)
+export function getMonthStart(): Date {
+  const kstNow = getKSTNow();
+  const monthStart = new Date(kstNow.getFullYear(), kstNow.getMonth(), 1, 0, 0, 0, 0);
+  return kstToUTC(monthStart);
+}
+
+// 기존 함수명 유지 (하위 호환성)
+export function getWeekStartDate(): Date {
+  return getLeaderboardWeekStart();
 }
 
 // 디스코드 아바타 URL 생성

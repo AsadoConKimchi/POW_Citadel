@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { LeaderboardEntry, PopularPowEntry, PowField } from '@/types';
 import { POW_FIELDS, POW_FIELD_OPTIONS, ROLE_BORDER_COLORS } from '@/constants';
-import { formatNumber, formatTime } from '@/lib/utils';
+import { formatNumber, formatTime, getLeaderboardWeekStart } from '@/lib/utils';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
 type LeaderboardType = 'donation' | 'time';
@@ -24,16 +24,8 @@ export default function LeaderboardPage() {
       const supabase = getSupabaseClient();
 
       try {
-        // 이번 주 시작일 계산
-        const now = new Date();
-        const dayOfWeek = now.getDay();
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - dayOfWeek);
-        weekStart.setHours(19, 0, 0, 0); // 일요일 19:00
-
-        if (now < weekStart) {
-          weekStart.setDate(weekStart.getDate() - 7);
-        }
+        // 이번 주 시작일 (일요일 19:00 KST 기준)
+        const weekStart = getLeaderboardWeekStart();
 
         if (leaderboardType === 'donation') {
           // 기부금 리더보드
@@ -153,19 +145,11 @@ export default function LeaderboardPage() {
       const supabase = getSupabaseClient();
 
       try {
-        // 이번 주 시작일 계산
-        const now = new Date();
-        const dayOfWeek = now.getDay();
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - dayOfWeek);
-        weekStart.setHours(19, 0, 0, 0);
-        if (now < weekStart) {
-          weekStart.setDate(weekStart.getDate() - 7);
-        }
+        // 이번 주 시작일 (일요일 19:00 KST 기준)
+        const weekStart = getLeaderboardWeekStart();
 
         // 지난 주 시작일 (동기화 범위: 이번 주 시작 - 3일)
-        const syncStart = new Date(weekStart);
-        syncStart.setDate(syncStart.getDate() - 3);
+        const syncStart = new Date(weekStart.getTime() - 3 * 24 * 60 * 60 * 1000);
 
         const { data, error } = await supabase
           .from('discord_reactions')

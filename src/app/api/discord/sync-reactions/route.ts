@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { getLeaderboardWeekStart } from '@/lib/utils';
 
 const DISCORD_API_URL = 'https://discord.com/api/v10';
 const SYNC_COOLDOWN_MS = 60 * 1000; // 1분 쿨다운
@@ -27,27 +28,10 @@ function areReactionsEqual(
   return true;
 }
 
-// 이번 주 시작일 계산 (일요일 19:00 KST 기준)
-function getWeekStartDate(): Date {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - dayOfWeek);
-  weekStart.setHours(19, 0, 0, 0);
-
-  if (now < weekStart) {
-    weekStart.setDate(weekStart.getDate() - 7);
-  }
-
-  return weekStart;
-}
-
 // 동기화 시작일 계산 (이번 주 시작 - 3일)
 function getSyncStartDate(): Date {
-  const weekStart = getWeekStartDate();
-  const syncStart = new Date(weekStart);
-  syncStart.setDate(syncStart.getDate() - 3);
-  return syncStart;
+  const weekStart = getLeaderboardWeekStart();
+  return new Date(weekStart.getTime() - 3 * 24 * 60 * 60 * 1000);
 }
 
 // Sync Discord reactions for all POW records (공유 함수)
