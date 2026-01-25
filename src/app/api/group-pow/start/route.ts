@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { SupabaseClient } from '@supabase/supabase-js';
+import webpush from 'web-push';
 
 const DISCORD_API_URL = 'https://discord.com/api/v10';
+
+// VAPID 설정
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+const VAPID_SUBJECT = 'mailto:pow-citadel@example.com';
+
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -88,8 +98,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 참여자들에게 출석체크 DM 발송
-    await sendAttendanceDMs(supabase, groupPowId, groupPow.title);
+    // 참여자들에게 출석체크 알림 발송 (푸시 + Discord DM)
+    await sendAttendanceNotifications(supabase, groupPowId, groupPow.title);
 
     return NextResponse.json({
       success: true,
@@ -105,17 +115,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// 참여자들에게 출석체크 DM 발송
-async function sendAttendanceDMs(
+// 참여자들에게 출석체크 알림 발송 (푸시 + Discord DM)
+async function sendAttendanceNotifications(
   supabase: SupabaseClient,
   groupPowId: string,
   groupPowTitle: string
 ) {
   const botToken = process.env.DISCORD_BOT_TOKEN;
-  if (!botToken) {
-    console.error('DISCORD_BOT_TOKEN not configured');
-    return;
-  }
 
   try {
     // 참여자 목록 조회 (users 테이블 join)
@@ -123,7 +129,7 @@ async function sendAttendanceDMs(
       .from('group_pow_participants')
       .select(`
         *,
-        users!inner(discord_id, discord_username)
+        users!inner(id, discord_id, discord_username)
       `)
       .eq('group_pow_id', groupPowId);
 
@@ -132,61 +138,106 @@ async function sendAttendanceDMs(
       return;
     }
 
-    // 각 참여자에게 DM 발송
+    // 각 참여자에게 알림 발송
     for (const participant of participants) {
+      const userId = (participant.users as any)?.id;
       const discordId = (participant.users as any)?.discord_id;
-      if (!discordId) continue;
 
-      try {
-        // DM 채널 생성
-        const dmChannelRes = await fetch(`${DISCORD_API_URL}/users/@me/channels`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bot ${botToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            recipient_id: discordId,
-          }),
-        });
+      // 1. 푸시 알림 발송
+      if (userId && VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+        try {
+          const { data: subscriptions } = await supabase
+            .from('push_subscriptions')
+            .select('*')
+            .eq('user_id', userId);
 
-        if (!dmChannelRes.ok) {
-          console.error(`Failed to create DM channel for ${discordId}:`, await dmChannelRes.text());
-          continue;
+          if (subscriptions && subscriptions.length > 0) {
+            const payload = {
+              title: '📣 그룹 POW 시작!',
+              body: `${groupPowTitle} - 출석체크를 완료해주세요!`,
+              tag: 'group-pow-attendance',
+              requireInteraction: true,
+              data: {
+                url: '/group-pow',
+                groupPowId,
+              },
+            };
+
+            for (const sub of subscriptions) {
+              try {
+                await webpush.sendNotification(
+                  { endpoint: sub.endpoint, keys: sub.keys },
+                  JSON.stringify(payload)
+                );
+              } catch (pushError: any) {
+                // 410/404 - 구독 만료
+                if (pushError.statusCode === 410 || pushError.statusCode === 404) {
+                  await supabase
+                    .from('push_subscriptions')
+                    .delete()
+                    .eq('id', sub.id);
+                }
+              }
+            }
+          }
+        } catch (pushError) {
+          console.error(`Push notification error for ${userId}:`, pushError);
         }
+      }
 
-        const dmChannel = await dmChannelRes.json();
-
-        // 출석체크 메시지 발송
-        const message = {
-          embeds: [{
-            title: '📣 그룹 POW 시작!',
-            description: `**${groupPowTitle}** 그룹 POW가 시작되었습니다!\n\n출석체크를 완료해주세요.`,
-            color: 0xFF6B35,
-            footer: {
-              text: '앱에서 출석체크를 진행해주세요.',
+      // 2. Discord DM 발송
+      if (discordId && botToken) {
+        try {
+          // DM 채널 생성
+          const dmChannelRes = await fetch(`${DISCORD_API_URL}/users/@me/channels`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bot ${botToken}`,
+              'Content-Type': 'application/json',
             },
-            timestamp: new Date().toISOString(),
-          }],
-        };
+            body: JSON.stringify({
+              recipient_id: discordId,
+            }),
+          });
 
-        const msgRes = await fetch(`${DISCORD_API_URL}/channels/${dmChannel.id}/messages`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bot ${botToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(message),
-        });
+          if (!dmChannelRes.ok) {
+            console.error(`Failed to create DM channel for ${discordId}:`, await dmChannelRes.text());
+            continue;
+          }
 
-        if (!msgRes.ok) {
-          console.error(`Failed to send DM to ${discordId}:`, await msgRes.text());
+          const dmChannel = await dmChannelRes.json();
+
+          // 출석체크 메시지 발송
+          const message = {
+            embeds: [{
+              title: '📣 그룹 POW 시작!',
+              description: `**${groupPowTitle}** 그룹 POW가 시작되었습니다!\n\n출석체크를 완료해주세요.`,
+              color: 0xFF6B35,
+              footer: {
+                text: '앱에서 출석체크를 진행해주세요.',
+              },
+              timestamp: new Date().toISOString(),
+            }],
+          };
+
+          const msgRes = await fetch(`${DISCORD_API_URL}/channels/${dmChannel.id}/messages`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bot ${botToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(message),
+          });
+
+          if (!msgRes.ok) {
+            console.error(`Failed to send DM to ${discordId}:`, await msgRes.text());
+          }
+        } catch (dmError) {
+          console.error(`Error sending DM to ${discordId}:`, dmError);
         }
-      } catch (dmError) {
-        console.error(`Error sending DM to ${discordId}:`, dmError);
       }
     }
   } catch (error) {
-    console.error('sendAttendanceDMs error:', error);
+    console.error('sendAttendanceNotifications error:', error);
   }
 }

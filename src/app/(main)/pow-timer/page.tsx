@@ -143,6 +143,15 @@ export default function PowTimerPage() {
 
     stopTimer();
 
+    // 예약된 푸시 알림 취소
+    if (user?.id) {
+      fetch('/api/push/schedule', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, type: 'pow_goal' }),
+      }).catch(() => {}); // 실패해도 무시
+    }
+
     // 완료된 POW 정보 설정
     const completedRecord = {
       id: '', // 서버에서 생성

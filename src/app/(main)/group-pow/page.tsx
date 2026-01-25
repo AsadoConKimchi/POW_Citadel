@@ -295,6 +295,7 @@ export default function GroupPowPage() {
         <GroupPowJoinModal
           groupPow={selectedPow}
           onClose={() => setSelectedPow(null)}
+          onRefresh={fetchGroupPows}
         />
       )}
     </div>
@@ -318,10 +319,73 @@ function GroupPowCard({
   completed?: boolean;
   currentUserId?: string;
 }) {
+  const [attendanceStatus, setAttendanceStatus] = useState<{
+    isParticipant: boolean;
+    attendanceChecked: boolean;
+    loading: boolean;
+  }>({ isParticipant: false, attendanceChecked: false, loading: true });
+  const [isCheckingAttendance, setIsCheckingAttendance] = useState(false);
+
   const fieldInfo = POW_FIELDS[groupPow.field];
   const progress = (groupPow.actual_sats_collected / groupPow.target_sats) * 100;
   const isCreator = currentUserId && groupPow.creator_id === currentUserId;
   const isOngoing = groupPow.status === 'ongoing';
+
+  // 출석체크 상태 조회
+  useEffect(() => {
+    if (!currentUserId || !isOngoing) {
+      setAttendanceStatus({ isParticipant: false, attendanceChecked: false, loading: false });
+      return;
+    }
+
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(
+          `/api/group-pow/attendance?groupPowId=${groupPow.id}&userId=${currentUserId}`
+        );
+        const data = await res.json();
+        setAttendanceStatus({
+          isParticipant: data.isParticipant,
+          attendanceChecked: data.attendanceChecked,
+          loading: false,
+        });
+      } catch {
+        setAttendanceStatus({ isParticipant: false, attendanceChecked: false, loading: false });
+      }
+    };
+
+    checkStatus();
+  }, [groupPow.id, currentUserId, isOngoing]);
+
+  // 출석체크 처리
+  const handleAttendance = async () => {
+    if (!currentUserId) return;
+
+    setIsCheckingAttendance(true);
+    try {
+      const res = await fetch('/api/group-pow/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupPowId: groupPow.id,
+          userId: currentUserId,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || '출석체크 실패');
+      }
+
+      alert('출석체크가 완료되었습니다!');
+      setAttendanceStatus((prev) => ({ ...prev, attendanceChecked: true }));
+    } catch (error: any) {
+      alert(error.message || '출석체크에 실패했습니다.');
+    } finally {
+      setIsCheckingAttendance(false);
+    }
+  };
 
   // 시작 가능 여부 체크 (예정 시간 ±15분)
   const canStart = () => {
@@ -385,11 +449,32 @@ function GroupPowCard({
         </div>
       </div>
 
-      {/* 진행 중 표시 */}
+      {/* 진행 중 표시 + 출석체크 */}
       {isOngoing && (
-        <div className="mt-3 flex items-center justify-center gap-2 py-2 bg-green-100 dark:bg-green-900 rounded-lg">
-          <span className="animate-pulse text-green-600 dark:text-green-400">●</span>
-          <span className="text-green-700 dark:text-green-300 font-medium">진행 중</span>
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-center gap-2 py-2 bg-green-100 dark:bg-green-900 rounded-lg">
+            <span className="animate-pulse text-green-600 dark:text-green-400">●</span>
+            <span className="text-green-700 dark:text-green-300 font-medium">진행 중</span>
+          </div>
+
+          {/* 참여자용 출석체크 버튼 (개최자 제외) */}
+          {!isCreator && !attendanceStatus.loading && attendanceStatus.isParticipant && (
+            <>
+              {attendanceStatus.attendanceChecked ? (
+                <div className="flex items-center justify-center gap-2 py-3 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                  <span className="text-blue-600 dark:text-blue-300">✅ 출석체크 완료</span>
+                </div>
+              ) : (
+                <button
+                  onClick={handleAttendance}
+                  disabled={isCheckingAttendance}
+                  className="w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold rounded-lg transition-colors"
+                >
+                  {isCheckingAttendance ? '처리 중...' : '✋ 출석체크'}
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 

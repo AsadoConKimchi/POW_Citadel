@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePowStore } from '@/stores/pow-store';
 import { POW_FIELD_OPTIONS } from '@/constants';
 import { PowField, PowMode } from '@/types';
 import { timeToSeconds } from '@/lib/utils';
+import { subscribeToPush, getPushSubscriptionStatus } from '@/lib/push';
 
 interface PowGoalFormProps {
   onClose: () => void;
@@ -13,7 +14,7 @@ interface PowGoalFormProps {
 
 export default function PowGoalForm({ onClose }: PowGoalFormProps) {
   const router = useRouter();
-  const { setCurrentPow, startTimer } = usePowStore();
+  const { user, setCurrentPow, startTimer } = usePowStore();
 
   const [field, setField] = useState<PowField>('study');
   const [goalContent, setGoalContent] = useState('');
@@ -22,6 +23,17 @@ export default function PowGoalForm({ onClose }: PowGoalFormProps) {
   const [targetSats, setTargetSats] = useState(1000);
   const [mode, setMode] = useState<PowMode>('immediate');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pushStatus, setPushStatus] = useState<{ subscribed: boolean; supported: boolean }>({
+    subscribed: false,
+    supported: false,
+  });
+
+  // 푸시 구독 상태 확인
+  useEffect(() => {
+    getPushSubscriptionStatus().then((status) => {
+      setPushStatus({ subscribed: status.subscribed, supported: status.supported });
+    });
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,6 +68,25 @@ export default function PowGoalForm({ onClose }: PowGoalFormProps) {
 
       // 타이머 시작
       startTimer();
+
+      // 푸시 알림 구독 및 예약 (백그라운드)
+      if (user?.id && pushStatus.supported) {
+        (async () => {
+          // 구독 안되어있으면 구독 시도
+          if (!pushStatus.subscribed) {
+            await subscribeToPush(user.id);
+          }
+          // 목표 시간 도달 시 푸시 알림 예약
+          await fetch('/api/push/schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              goalTimeSeconds: goalTime,
+            }),
+          });
+        })();
+      }
 
       // 타이머 페이지로 이동
       router.push('/pow-timer');

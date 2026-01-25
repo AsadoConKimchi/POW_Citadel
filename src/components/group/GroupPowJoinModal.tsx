@@ -10,18 +10,36 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 interface GroupPowJoinModalProps {
   groupPow: GroupPow;
   onClose: () => void;
+  onRefresh?: () => void;
 }
 
-export default function GroupPowJoinModal({ groupPow, onClose }: GroupPowJoinModalProps) {
+export default function GroupPowJoinModal({ groupPow, onClose, onRefresh }: GroupPowJoinModalProps) {
   const { user } = usePowStore();
   const [pledgedSats, setPledgedSats] = useState(1000);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAlreadyJoined, setIsAlreadyJoined] = useState(false);
   const [participantCount, setParticipantCount] = useState(0);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+  const [isCheckingAttendance, setIsCheckingAttendance] = useState(false);
+  const [attendanceChecked, setAttendanceChecked] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState(groupPow.status);
 
   const fieldInfo = POW_FIELDS[groupPow.field];
+  const isCreator = user?.id === groupPow.creator_id;
+  const isOngoing = currentStatus === 'ongoing';
 
-  // 이미 참여 여부 확인
+  // 시작 가능 여부 체크 (예정 시간 ±15분)
+  const canStart = () => {
+    if (currentStatus !== 'upcoming') return false;
+    const plannedDate = new Date(groupPow.planned_date);
+    const now = new Date();
+    const timeDiff = now.getTime() - plannedDate.getTime();
+    const fifteenMinutes = 15 * 60 * 1000;
+    return timeDiff >= -fifteenMinutes && timeDiff <= fifteenMinutes;
+  };
+
+  // 이미 참여 여부 및 출석체크 상태 확인
   useEffect(() => {
     const checkParticipation = async () => {
       if (!user) return;
@@ -34,12 +52,87 @@ export default function GroupPowJoinModal({ groupPow, onClose }: GroupPowJoinMod
 
       setParticipantCount(count || 0);
 
-      const isJoined = data?.some((p) => p.user_id === user.id);
-      setIsAlreadyJoined(!!isJoined);
+      const participant = data?.find((p) => p.user_id === user.id);
+      setIsAlreadyJoined(!!participant);
+      setAttendanceChecked(!!participant?.attendance_checked);
     };
 
     checkParticipation();
   }, [groupPow.id, user]);
+
+  // 그룹 POW 시작
+  const handleStart = async () => {
+    if (!user?.id || !confirm('그룹 POW를 시작하시겠습니까?')) return;
+
+    setIsStarting(true);
+    try {
+      const response = await fetch('/api/group-pow/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupPowId: groupPow.id, userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '시작 실패');
+
+      alert('그룹 POW가 시작되었습니다!');
+      setCurrentStatus('ongoing');
+      onRefresh?.();
+    } catch (error: any) {
+      alert(error.message || '시작에 실패했습니다.');
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  // 그룹 POW 종료
+  const handleEnd = async () => {
+    if (!user?.id || !confirm('그룹 POW를 종료하시겠습니까?\n달성률이 계산됩니다.')) return;
+
+    setIsEnding(true);
+    try {
+      const response = await fetch('/api/group-pow/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupPowId: groupPow.id, userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '종료 실패');
+
+      alert(`그룹 POW가 종료되었습니다!\n달성률: ${data.achievementRate}%`);
+      onRefresh?.();
+      onClose();
+    } catch (error: any) {
+      alert(error.message || '종료에 실패했습니다.');
+    } finally {
+      setIsEnding(false);
+    }
+  };
+
+  // 출석체크
+  const handleAttendance = async () => {
+    if (!user?.id) return;
+
+    setIsCheckingAttendance(true);
+    try {
+      const response = await fetch('/api/group-pow/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupPowId: groupPow.id, userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '출석체크 실패');
+
+      alert('출석체크가 완료되었습니다!');
+      setAttendanceChecked(true);
+    } catch (error: any) {
+      alert(error.message || '출석체크에 실패했습니다.');
+    } finally {
+      setIsCheckingAttendance(false);
+    }
+  };
 
   const handleJoin = async () => {
     if (!user) {
@@ -162,17 +255,75 @@ export default function GroupPowJoinModal({ groupPow, onClose }: GroupPowJoinMod
             </div>
           </div>
 
-          {isAlreadyJoined ? (
+          {/* 진행 중 표시 */}
+          {isOngoing && (
+            <div className="flex items-center justify-center gap-2 py-3 bg-green-100 dark:bg-green-900 rounded-lg">
+              <span className="animate-pulse text-green-600 dark:text-green-400">●</span>
+              <span className="text-green-700 dark:text-green-300 font-medium">진행 중</span>
+            </div>
+          )}
+
+          {/* 개최자 전용 버튼 */}
+          {isCreator && (
+            <div className="space-y-2">
+              {currentStatus === 'upcoming' && canStart() && (
+                <button
+                  onClick={handleStart}
+                  disabled={isStarting}
+                  className="w-full py-4 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-bold rounded-xl transition-colors"
+                >
+                  {isStarting ? '시작 중...' : '▶️ 그룹 POW 시작'}
+                </button>
+              )}
+              {currentStatus === 'upcoming' && !canStart() && (
+                <div className="text-center py-3 bg-gray-100 dark:bg-gray-700 rounded-xl">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    예정 시간 ±15분 내에 시작할 수 있습니다.
+                  </p>
+                </div>
+              )}
+              {isOngoing && (
+                <button
+                  onClick={handleEnd}
+                  disabled={isEnding}
+                  className="w-full py-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold rounded-xl transition-colors"
+                >
+                  {isEnding ? '종료 중...' : '⏹️ 그룹 POW 종료'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 참석자: 진행 중일 때 출석체크 */}
+          {!isCreator && isOngoing && isAlreadyJoined && (
+            <div className="space-y-2">
+              {attendanceChecked ? (
+                <div className="flex items-center justify-center gap-2 py-4 bg-blue-100 dark:bg-blue-900 rounded-xl">
+                  <span className="text-blue-600 dark:text-blue-300 font-medium">✅ 출석체크 완료</span>
+                </div>
+              ) : (
+                <button
+                  onClick={handleAttendance}
+                  disabled={isCheckingAttendance}
+                  className="w-full py-4 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold rounded-xl transition-colors"
+                >
+                  {isCheckingAttendance ? '처리 중...' : '✋ 출석체크'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {isAlreadyJoined && !isOngoing ? (
             <div className="text-center py-4">
               <div className="text-4xl mb-2">✅</div>
               <p className="text-gray-700 dark:text-gray-300 font-medium">
                 이미 참여 완료했습니다!
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                그룹 POW 시작 시간에 출석체크 DM을 보내드립니다.
+                그룹 POW 시작 시 알림을 보내드립니다.
               </p>
             </div>
-          ) : (
+          ) : !isAlreadyJoined && !isOngoing ? (
             <>
               {/* 기부 의사금액 입력 */}
               <div>
@@ -204,7 +355,7 @@ export default function GroupPowJoinModal({ groupPow, onClose }: GroupPowJoinMod
                 {isSubmitting ? '참여 중...' : '👥 참여하기'}
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
