@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePowStore } from '@/stores/pow-store';
 import { POW_FIELDS } from '@/constants';
@@ -26,6 +26,26 @@ export default function PowTimerPage() {
     clearCurrentPow,
   } = usePowStore();
 
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('default');
+  const goalReachedRef = useRef(false); // 목표 도달 알림 중복 방지
+
+  // 알림 권한 요청
+  useEffect(() => {
+    if (!('Notification' in window)) {
+      setNotificationPermission('unsupported');
+      return;
+    }
+
+    setNotificationPermission(Notification.permission);
+
+    // 권한이 default면 요청
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().then((permission) => {
+        setNotificationPermission(permission);
+      });
+    }
+  }, []);
+
   // 타이머 틱
   useEffect(() => {
     if (!timer.isRunning || timer.isPaused) return;
@@ -39,16 +59,57 @@ export default function PowTimerPage() {
 
   // 목표 시간 도달 시 알림
   useEffect(() => {
-    if (timer.elapsedSeconds > 0 && timer.elapsedSeconds === currentPow.goalTime) {
-      // Push notification (if supported)
+    if (timer.elapsedSeconds > 0 && timer.elapsedSeconds >= currentPow.goalTime && !goalReachedRef.current) {
+      goalReachedRef.current = true;
+
+      // 1. 소리 알림 (Web Audio API로 비프음 생성)
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.value = 880; // A5 음
+        oscillator.type = 'sine';
+        gainNode.gain.value = 0.3;
+
+        oscillator.start();
+        // 비프음 3회: 삐-삐-삐
+        setTimeout(() => { gainNode.gain.value = 0; }, 200);
+        setTimeout(() => { gainNode.gain.value = 0.3; }, 300);
+        setTimeout(() => { gainNode.gain.value = 0; }, 500);
+        setTimeout(() => { gainNode.gain.value = 0.3; }, 600);
+        setTimeout(() => { gainNode.gain.value = 0; }, 800);
+        setTimeout(() => { oscillator.stop(); audioContext.close(); }, 900);
+      } catch (e) {
+        // 오디오 재생 실패 무시
+      }
+
+      // 2. 진동 알림 (모바일)
+      if ('vibrate' in navigator) {
+        navigator.vibrate([200, 100, 200, 100, 200]);
+      }
+
+      // 3. 브라우저 알림
       if ('Notification' in window && Notification.permission === 'granted') {
         new Notification('🎯 목표 시간에 도달했습니다!', {
-          body: 'POW를 종료하세요.',
+          body: 'POW를 종료하고 인증하세요.',
           icon: '/icons/icon-192x192.png',
+          tag: 'pow-goal-reached', // 중복 알림 방지
+          requireInteraction: true, // 사용자가 닫을 때까지 유지
         });
       }
     }
   }, [timer.elapsedSeconds, currentPow.goalTime]);
+
+  // 목표 도달 상태 리셋 (새 POW 시작 시)
+  useEffect(() => {
+    if (timer.elapsedSeconds === 0) {
+      goalReachedRef.current = false;
+    }
+  }, [timer.elapsedSeconds]);
 
   // POW가 없으면 나의 POW 페이지로 리다이렉트
   if (!currentPow.field || !timer.isRunning) {
@@ -193,6 +254,28 @@ export default function PowTimerPage() {
       {/* 모드 표시 */}
       <div className="mt-6 text-sm text-gray-500 dark:text-gray-400">
         {currentPow.mode === 'immediate' ? '⚡ 즉시기부 모드' : '💾 적립 후 기부 모드'}
+      </div>
+
+      {/* 알림 권한 상태 */}
+      <div className="mt-4 text-xs">
+        {notificationPermission === 'granted' ? (
+          <span className="text-green-500">🔔 알림 켜짐</span>
+        ) : notificationPermission === 'denied' ? (
+          <span className="text-red-500">🔕 알림 차단됨 (설정에서 허용해주세요)</span>
+        ) : notificationPermission === 'unsupported' ? (
+          <span className="text-gray-400">알림 미지원 브라우저</span>
+        ) : (
+          <button
+            onClick={() => {
+              Notification.requestPermission().then((permission) => {
+                setNotificationPermission(permission);
+              });
+            }}
+            className="text-orange-500 underline"
+          >
+            🔔 알림 권한 허용하기
+          </button>
+        )}
       </div>
     </div>
   );
