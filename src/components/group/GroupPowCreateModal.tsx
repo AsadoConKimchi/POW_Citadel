@@ -22,6 +22,7 @@ export default function GroupPowCreateModal({ onClose, onSuccess }: GroupPowCrea
   const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
   const [plannedDate, setPlannedDate] = useState('');
   const [plannedTime, setPlannedTime] = useState('19:00');
+  const [location, setLocation] = useState('');
   const [durationHours, setDurationHours] = useState(2);
   const [durationMinutes, setDurationMinutes] = useState(0);
   const [targetSats, setTargetSats] = useState(50000);
@@ -77,6 +78,7 @@ export default function GroupPowCreateModal({ onClose, onSuccess }: GroupPowCrea
       formData.append('field', field);
       formData.append('description', description.trim());
       formData.append('plannedDate', `${plannedDate}T${plannedTime}:00`);
+      formData.append('location', location.trim());
       formData.append('plannedDuration', String(plannedDuration));
       formData.append('targetSats', String(targetSats));
       formData.append('creatorId', user.id);
@@ -237,6 +239,20 @@ export default function GroupPowCreateModal({ onClose, onSuccess }: GroupPowCrea
                 className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border-0 rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500"
               />
             </div>
+          </div>
+
+          {/* 장소 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              📍 장소 (선택)
+            </label>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value.slice(0, 100))}
+              placeholder="예: Bitcoin House Origin"
+              className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border-0 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-orange-500"
+            />
           </div>
 
           {/* 활동 시간 */}

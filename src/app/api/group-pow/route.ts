@@ -9,6 +9,7 @@ export async function POST(request: NextRequest) {
     const field = formData.get('field') as string;
     const description = formData.get('description') as string;
     const plannedDate = formData.get('plannedDate') as string;
+    const location = formData.get('location') as string;
     const plannedDuration = parseInt(formData.get('plannedDuration') as string);
     const targetSats = parseInt(formData.get('targetSats') as string);
     const creatorId = formData.get('creatorId') as string;
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
         title,
         field,
         description: description || null,
+        location: location || null,
         thumbnail_url: thumbnailUrl,
         planned_date: new Date(plannedDate).toISOString(),
         planned_duration: plannedDuration,
@@ -112,29 +114,40 @@ async function sendGroupPowAnnouncement(groupPow: any) {
 
   const fieldInfo = POW_FIELDS[groupPow.field as keyof typeof POW_FIELDS];
 
+  const fields = [
+    {
+      name: '📅 일시',
+      value: formatDateTimeKorean(groupPow.planned_date),
+      inline: true,
+    },
+    {
+      name: '⏱️ 예정 시간',
+      value: formatTime(groupPow.planned_duration),
+      inline: true,
+    },
+    {
+      name: '🎯 목표 모금',
+      value: `${formatNumber(groupPow.target_sats)} sats`,
+      inline: true,
+    },
+  ];
+
+  // 장소가 있으면 추가
+  if (groupPow.location) {
+    fields.push({
+      name: '📍 장소',
+      value: groupPow.location,
+      inline: true,
+    });
+  }
+
   const message = {
     embeds: [
       {
         title: `${fieldInfo.emoji} 새로운 그룹 POW 개최!`,
         description: groupPow.title,
         color: 0xFF6B35,
-        fields: [
-          {
-            name: '📅 일시',
-            value: formatDateTimeKorean(groupPow.planned_date),
-            inline: true,
-          },
-          {
-            name: '⏱️ 예정 시간',
-            value: formatTime(groupPow.planned_duration),
-            inline: true,
-          },
-          {
-            name: '🎯 목표 모금',
-            value: `${formatNumber(groupPow.target_sats)} sats`,
-            inline: true,
-          },
-        ],
+        fields,
         thumbnail: groupPow.thumbnail_url ? { url: groupPow.thumbnail_url } : undefined,
         footer: {
           text: '앱에서 참여하세요!',
