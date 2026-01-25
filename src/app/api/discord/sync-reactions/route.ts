@@ -8,6 +8,25 @@ const REQUEST_DELAY_MS = 1000; // Discord Rate Limit 방지용 1초 딜레이
 // 딜레이 헬퍼 함수
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// reaction_details 비교 함수 (키 정렬 후 비교)
+function areReactionsEqual(
+  existing: Record<string, number> | null,
+  current: Record<string, number>
+): boolean {
+  if (!existing) return false;
+
+  const existingKeys = Object.keys(existing).sort();
+  const currentKeys = Object.keys(current).sort();
+
+  if (existingKeys.length !== currentKeys.length) return false;
+
+  for (const key of currentKeys) {
+    if (existing[key] !== current[key]) return false;
+  }
+
+  return true;
+}
+
 // 이번 주 시작일 계산 (일요일 19:00 KST 기준)
 function getWeekStartDate(): Date {
   const now = new Date();
@@ -90,6 +109,7 @@ async function syncAllReactions() {
     }
 
     let updatedCount = 0;
+    let skippedCount = 0;
 
     for (let i = 0; i < powRecords.length; i++) {
       const record = powRecords[i];
@@ -136,15 +156,27 @@ async function syncAllReactions() {
           reactionDetails[emoji] = count;
         }
 
-        // Check if record exists
+        // 기존 데이터 조회 (total_reactions, reaction_details 포함)
         const { data: existingReaction } = await supabase
           .from('discord_reactions')
-          .select('id')
+          .select('id, total_reactions, reaction_details')
           .eq('pow_record_id', record.id)
-          .single();
+          .maybeSingle(); // 없으면 null, 있으면 데이터 반환 (에러 없음)
 
         if (existingReaction) {
-          // Update existing record
+          // 변경 여부 확인
+          const hasChanged = !areReactionsEqual(
+            existingReaction.reaction_details as Record<string, number> | null,
+            reactionDetails
+          );
+
+          if (!hasChanged) {
+            // 변경 없음 - 스킵
+            skippedCount++;
+            continue;
+          }
+
+          // 변경됨 - UPDATE
           const { error: updateError } = await supabase
             .from('discord_reactions')
             .update({
@@ -159,14 +191,17 @@ async function syncAllReactions() {
             continue;
           }
         } else {
-          // Insert new record
+          // 기존 데이터 없음 - INSERT (upsert 사용으로 중복 방지)
           const { error: insertError } = await supabase
             .from('discord_reactions')
-            .insert({
+            .upsert({
               pow_record_id: record.id,
               discord_message_id: record.discord_message_id,
               total_reactions: totalReactions,
               reaction_details: reactionDetails,
+              last_updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'pow_record_id',
             });
 
           if (insertError) {
@@ -195,8 +230,8 @@ async function syncAllReactions() {
     return NextResponse.json({
       message: 'Reactions synced successfully',
       updated: updatedCount,
+      unchanged: skippedCount,
       total: powRecords.length,
-      skipped: false,
     });
   } catch (error) {
     console.error('Sync reactions error:', error);
@@ -287,15 +322,30 @@ export async function GET(request: Request) {
       reactionDetails[emoji] = count;
     }
 
-    // Check if record exists
+    // 기존 데이터 조회
     const { data: existingReaction } = await supabase
       .from('discord_reactions')
-      .select('id')
+      .select('id, total_reactions, reaction_details')
       .eq('pow_record_id', powRecord.id)
-      .single();
+      .maybeSingle();
 
     if (existingReaction) {
-      // Update existing record
+      // 변경 여부 확인
+      const hasChanged = !areReactionsEqual(
+        existingReaction.reaction_details as Record<string, number> | null,
+        reactionDetails
+      );
+
+      if (!hasChanged) {
+        return NextResponse.json({
+          message: 'No changes detected',
+          skipped: true,
+          totalReactions,
+          reactionDetails,
+        });
+      }
+
+      // 변경됨 - UPDATE
       const { error: updateError } = await supabase
         .from('discord_reactions')
         .update({
@@ -312,14 +362,17 @@ export async function GET(request: Request) {
         );
       }
     } else {
-      // Insert new record
+      // 기존 데이터 없음 - INSERT (upsert로 중복 방지)
       const { error: insertError } = await supabase
         .from('discord_reactions')
-        .insert({
+        .upsert({
           pow_record_id: powRecord.id,
           discord_message_id: powRecord.discord_message_id,
           total_reactions: totalReactions,
           reaction_details: reactionDetails,
+          last_updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'pow_record_id',
         });
 
       if (insertError) {
@@ -332,6 +385,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       message: 'Reactions synced successfully',
+      updated: true,
       totalReactions,
       reactionDetails,
     });
