@@ -76,6 +76,7 @@ export interface GroupPow {
   title: string;
   field: PowField;
   description: string | null;
+  location: string | null;
   thumbnail_url: string | null;
   planned_date: string;
   planned_duration: number; // seconds

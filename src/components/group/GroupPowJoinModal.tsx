@@ -120,18 +120,28 @@ export default function GroupPowJoinModal({ groupPow, onClose }: GroupPowJoinMod
               </p>
             )}
 
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="text-gray-500 dark:text-gray-400">
-                시작: <span className="text-gray-900 dark:text-white">{formatDateTimeKorean(groupPow.planned_date)}</span>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-start gap-2">
+                <span className="text-gray-500 dark:text-gray-400">📅</span>
+                <span className="text-gray-900 dark:text-white">{formatDateTimeKorean(groupPow.planned_date)}</span>
               </div>
-              <div className="text-gray-500 dark:text-gray-400">
-                시간: <span className="text-gray-900 dark:text-white">{formatTime(groupPow.planned_duration)}</span>
+              {groupPow.location && (
+                <div className="flex items-start gap-2">
+                  <span className="text-gray-500 dark:text-gray-400">📍</span>
+                  <span className="text-gray-900 dark:text-white">{groupPow.location}</span>
+                </div>
+              )}
+              <div className="flex items-start gap-2">
+                <span className="text-gray-500 dark:text-gray-400">⏱️</span>
+                <span className="text-gray-900 dark:text-white">{formatTime(groupPow.planned_duration)}</span>
               </div>
-              <div className="text-gray-500 dark:text-gray-400">
-                참여자: <span className="text-gray-900 dark:text-white">{participantCount}명</span>
+              <div className="flex items-start gap-2">
+                <span className="text-gray-500 dark:text-gray-400">👥</span>
+                <span className="text-gray-900 dark:text-white">{participantCount}명 참여</span>
               </div>
-              <div className="text-gray-500 dark:text-gray-400">
-                목표: <span className="text-orange-500">{formatNumber(groupPow.target_sats)} sats</span>
+              <div className="flex items-start gap-2">
+                <span className="text-gray-500 dark:text-gray-400">🎯</span>
+                <span className="text-orange-500">{formatNumber(groupPow.target_sats)} sats 목표</span>
               </div>
             </div>
 

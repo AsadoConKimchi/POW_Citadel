@@ -356,10 +356,15 @@ function GroupPowCard({
             )}
           </div>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            {formatDateTimeKorean(groupPow.planned_date)}
+            📅 {formatDateTimeKorean(groupPow.planned_date)}
           </p>
+          {groupPow.location && (
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              📍 {groupPow.location}
+            </p>
+          )}
           <p className="text-sm text-gray-500 dark:text-gray-500">
-            예정 시간: {formatTime(groupPow.planned_duration)}
+            ⏱️ 예정 시간: {formatTime(groupPow.planned_duration)}
           </p>
         </div>
       </div>
